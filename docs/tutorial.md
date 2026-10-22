@@ -1,39 +1,37 @@
 # Build a coding agent with OpenAI Agents API and Render Sandboxes
 
-In this tutorial, you build a coding agent that accepts a prompt, streams its
-work, and returns its response and output files.
+> **Note:** Render Sandboxes is in early access. The OpenAI Agents API is in
+> beta, and `codex exec-server` is experimental.
 
-OpenAI runs the Codex agent loop through the Agents API. `codex exec-server`
-runs the coding agent's commands and file edits in an isolated Render Sandbox
-in your Render workspace.
+The [OpenAI Agents API](https://developers.openai.com/api/docs/guides/agents-api/environments/self-hosted)
+runs the Codex agent loop on OpenAI's infrastructure and can send its commands
+and file edits to a self-hosted environment. Render Sandboxes gives that
+environment an isolated, ephemeral Linux machine in your Render workspace, with
+outbound traffic denied by default.
 
-You will learn how to:
+In this tutorial, you build a coding agent that accepts a prompt, runs Codex's
+commands and file edits through `codex exec-server` in a Render Sandbox, and
+copies the output files to your machine. The
+[template source](https://github.com/render-examples/openai-agents-api-sandbox)
+contains everything you run here.
 
-- connect an OpenAI Agents API session to a Render Sandbox;
-- send a coding task as a prompt and follow native session events;
-- copy files the agent writes to `/workspace/output`; and
-- clean up the session and sandbox.
-
-Time to complete: about 20 minutes after access is enabled.
+Time to complete: 20 minutes, after access is enabled
 
 ## Prerequisites
 
-You need:
+1. A Render workspace with Sandboxes enabled, a
+   [Render API key](https://render.com/docs/api), and your workspace ID
+   (`tea-...`).
+2. OpenAI Agents API access and an
+   [OpenAI API key](https://platform.openai.com/api-keys) with permission to
+   manage Agents API sessions.
+3. A second OpenAI key, restricted to connecting self-hosted environments, for
+   the executor. The runner refuses to start if the two keys are the same.
+4. [Node.js](https://nodejs.org/) 22 or later and Git.
 
-- A Render workspace with Render Sandboxes enabled
-- A Render API key and workspace ID
-- OpenAI Agents API access
-- An OpenAI application API key with the permissions required for Agents API
-  sessions
-- A separate OpenAI environment key restricted to connecting self-hosted
-  environments
-- Node.js and Git
+## 1. Get the template
 
-Render Sandboxes is early access. The Agents API is beta, and
-`codex exec-server` is experimental. This template pins the exact Codex version
-that its install script verifies.
-
-## Get the template
+Clone the tagged release and install its dependencies:
 
 ```bash
 git clone --branch v1.0.0 --depth 1 \
@@ -42,7 +40,7 @@ cd openai-agents-api-sandbox
 npm ci
 ```
 
-## Configure credentials
+## 2. Configure credentials
 
 Copy the example environment file:
 
@@ -50,147 +48,190 @@ Copy the example environment file:
 cp .env.example .env
 ```
 
-Set:
+Fill in your values:
 
-```text
-RENDER_API_KEY=
-RENDER_WORKSPACE_ID=
-OPENAI_API_KEY=
-OPENAI_EXECUTOR_API_KEY=
+```sh
+RENDER_API_KEY=rnd_your-render-api-key
+RENDER_WORKSPACE_ID=tea-your-workspace-id
+OPENAI_API_KEY=sk-your-application-key
+OPENAI_EXECUTOR_API_KEY=sk-your-restricted-executor-key
 ```
 
-`OPENAI_API_KEY` stays with the application. Only the restricted executor
-credential enters the sandbox, where `codex exec-server` reads it as
-`CODEX_API_KEY`.
+`OPENAI_API_KEY` stays on your machine. Only the restricted executor key enters
+the sandbox, where `codex exec-server` reads it as `CODEX_API_KEY`. To use a
+different model, set `OPENAI_MODEL`.
 
-## Run the coding agent
+## 3. Run the agent
+
+Run the agent with a prompt:
 
 ```bash
 npm run agent -- "Create a hello world HTTP server in /workspace/output. Test it before you finish."
 ```
 
-Expected summary:
+You should see the session's progress stream to the console. Executor logs are
+omitted here:
 
 ```text
+provider      openai
 preflight     passed
 provision     sbx-...
 environment   connected
 prompt        submitted
-agent         created and tested the server
+progress      reasoning
+progress      command_execution
+progress      command_execution
+agent         I created /workspace/output/server.js and confirmed it responds with "Hello, world!".
+progress      message
 result        task completed
 outputs       copied 1 file to runs/run_.../output
-cleanup       OpenAI session succeeded; sandbox succeeded
+cleanup       session deleted; sandbox terminated
 ```
 
-## What happened
+Codex wrote the server, tested it inside the sandbox, and the runner copied it
+to your machine. Then the runner deleted the session and terminated the
+sandbox.
 
-The template:
+## 4. Understand how it works
 
-1. Creates a self-hosted Agents API session.
-2. Atomically records the session and environment IDs and retains the remote
-   URL in memory for the executor connection.
-3. Creates a Render Sandbox with the required egress policy.
-4. Opens the OpenAI session event stream.
-5. Starts `codex exec-server` in the sandbox with the restricted environment
-   credential.
-6. Waits for the environment-connected event and submits your prompt.
-7. Streams the final result and copies files from `/workspace/output`.
-8. Deletes the OpenAI session and terminates the Render Sandbox.
+[`src/agent.ts`](https://github.com/render-examples/openai-agents-api-sandbox/blob/v1.0.0/src/agent.ts)
+runs one session from start to finish. Simplified, the lifecycle is:
 
-The implementation uses OpenAI's native session and event types directly. It
-does not use a cross-provider adapter.
+```ts
+await openai.preflight(signal);
+const connection = await openai.createSession(model);
+const sandboxId = await render.create(buildSandboxLaunchInput(executorApiKey, timeoutSeconds));
+await render.waitUntilRunning(sandboxId, deadline, signal);
+await render.installExecutor(sandboxId, installScript, signal, executorLog);
 
-## How the template is organized
+const sessionRun = await openai.openSessionEvents(sessionId, store);
+executor = await render.startExecutor(sandboxId, remoteUrl, environmentId, signal, executorLog);
+await sessionRun.waitForEnvironment();
+await openai.submitPrompt(sessionId, prompt, idempotencyKey);
+const result = await sessionRun.waitForCompletion();
+await copyWorkspaceOutputs(render, sandboxId, localOutput, redactor, signal);
 
-- [`src/agent.ts`](../src/agent.ts) owns the one-shot lifecycle and cleanup.
-- [`src/openai.ts`](../src/openai.ts) uses native OpenAI Sessions and events.
-- [`src/render.ts`](../src/render.ts) polls asynchronous creation and drains
-  streamed `bash -c` exec events.
-- [`src/launch-policy.ts`](../src/launch-policy.ts) contains the egress and
-  credential-delivery compatibility seam.
-- [`src/outputs.ts`](../src/outputs.ts) lists and downloads regular files from
-  `/workspace/output`.
+// In `finally`, on success, failure, timeout, or Ctrl+C:
+await openai.deleteSession(sessionId);
+await render.terminate(sandboxId);
+```
+
+Here is what the key pieces do:
+
+| Piece | Purpose |
+| --- | --- |
+| `openai.preflight()` | Lists one session to confirm Agents API access before anything is created. |
+| `openai.createSession()` | Creates a self-hosted session and returns its environment ID and remote URL, in [`src/openai.ts`](https://github.com/render-examples/openai-agents-api-sandbox/blob/v1.0.0/src/openai.ts). |
+| `buildSandboxLaunchInput()` | Declares the egress allow-list and the only credential that enters the sandbox, in [`src/launch-policy.ts`](https://github.com/render-examples/openai-agents-api-sandbox/blob/v1.0.0/src/launch-policy.ts). |
+| `install-executor.sh` | Installs `@openai/codex` 0.163.0 after checking its pinned npm integrity, in [`scripts/install-executor.sh`](https://github.com/render-examples/openai-agents-api-sandbox/blob/v1.0.0/scripts/install-executor.sh). |
+| `openai.openSessionEvents()` | Opens the native session event stream before the executor connects, so no event is missed. |
+| `render.startExecutor()` | Runs `codex exec-server` as a streamed foreground command in the sandbox. |
+| `openai.submitPrompt()` | Sends your prompt after the environment connects, with an idempotency key. |
+| `copyWorkspaceOutputs()` | Copies regular files from `/workspace/output` to your machine. |
+| `openai.deleteSession()` | Deletes the session. The runner then terminates the sandbox, even if deletion failed. |
+
+Each run writes its state to `runs/<run_id>/`: `run.json` (resource IDs,
+egress policy, and cleanup status, but no credentials), the native
+`events.jsonl`, `executor.log`, and `result.txt`.
 
 ## What you built
 
-You built a one-shot Codex runner that accepts a prompt, connects an OpenAI
-Agents API session to a Render Sandbox, streams the native session events, and
-copies optional output files back to your machine.
+You built a coding agent that:
+
+- Accepts a natural-language coding task
+- Runs Codex's commands and file edits in an isolated Render Sandbox with
+  default-deny egress
+- Streams native Agents API session events as it works
+- Copies deliverable files back to your machine and cleans up every per-run
+  resource
 
 ## Security
 
-The OpenAI application key never enters the sandbox. Code the agent runs can
-read any credential materialized in the same sandbox, so the executor
-credential must have only the permissions required to connect that environment.
+Your OpenAI application key never enters the sandbox. Any code the agent runs
+can read credentials that are present in the sandbox, so give the executor key
+only the permissions it needs to connect the environment. The current Render
+SDK has no credential broker, so the template sets the executor key as a
+creation-time environment variable. That behavior is isolated in
+`src/launch-policy.ts`, so a broker can replace it without changing the
+lifecycle.
 
-The Render egress policy allows only `api.openai.com`,
-`codex-cloud-environments.chatgpt.com`, and `registry.npmjs.org`. npm access
-remains enabled for this short-lived example because the public SDK does not
-provide stage-scoped policy updates. Tool inputs and outputs pass through
-OpenAI because OpenAI hosts the agent loop.
+The sandbox's egress policy is a default-deny allow-list. At run time, the
+executor needs only `api.openai.com` and
+`codex-cloud-environments.chatgpt.com`. `registry.npmjs.org` is needed only to
+install Codex, but the SDK cannot narrow a policy after the sandbox is created,
+so it stays allowed for this short-lived run. Tool inputs and outputs pass
+through OpenAI, because OpenAI hosts the agent loop.
 
-The current public Render SDK does not expose destination-bound credential
-brokering. The restricted executor key is therefore materialized in the
-sandbox at creation. This compatibility behavior is isolated in
-`src/launch-policy.ts`; it does not fabricate future SDK fields.
+Treat every prompt as untrusted. Don't use production credentials or sensitive
+source code with this example until you have reviewed its policy and
+credential settings.
 
-Do not use production credentials or sensitive source code with this example
-until you have reviewed its policy and credential settings.
+## Customize the agent
 
-## Customize the template
-
-You can change:
-
-- prompt handling in `src/agent.ts`;
-- the executor version and installation in `scripts/install-executor.sh`;
-- the sandbox lifetime and egress policy in `src/render.ts`; and
-- output collection in `src/outputs.ts`.
-
-The pinned Codex `0.163.0` release was checked for the
-`codex exec-server --remote ... --environment-id ...` command. At the time this
-template was built, OpenAI's documented npm `alpha` dist-tag resolved to an
-unpublished umbrella version, so the runnable exact stable release is used
-instead of an unresolvable tag.
+- **Prompt and instructions:** the runner sends your prompt as written. Change
+  the agent's instructions in `createSession()` in `src/openai.ts`, and its
+  model with `OPENAI_MODEL`.
+- **Toolchain:** install more tools in `scripts/install-executor.sh`, and add
+  their download hosts to `INSTALL_DESTINATIONS` in `src/launch-policy.ts`.
+- **Egress:** add hosts the agent needs while it works to
+  `RUNTIME_DESTINATIONS` in `src/launch-policy.ts`.
+- **Lifetime:** pass `--timeout <seconds>` or set `AGENT_TIMEOUT_SECONDS`
+  (30–86400; the default is 600). The sandbox lifetime is derived from it in
+  `src/agent.ts`.
+- **Outputs:** pass `--output <path>` to copy files somewhere other than
+  `runs/<run_id>/output`, or change collection in `src/outputs.ts`.
 
 ## Clean up
 
-Cleanup runs automatically on success, failure, timeout, SIGINT, and SIGTERM.
-If cleanup is incomplete, the command prints the OpenAI session ID, Render
-Sandbox ID, and exact manual cleanup commands.
+Cleanup runs automatically after success, failure, timeout, Ctrl+C, and
+SIGTERM. Deleting the session and terminating the sandbox are independent
+steps, so one failing doesn't block the other.
 
-Deleting the OpenAI session and terminating the Render Sandbox are separate
-operations.
+If a cleanup step fails, the runner prints the exact commands to finish it:
+
+```bash
+curl -X DELETE "https://api.openai.com/v1/agents/sessions/$SESSION_ID" \
+  -H "Authorization: Bearer $OPENAI_API_KEY" \
+  -H "OpenAI-Beta: agents=v1"
+RENDER_WORKSPACE="$RENDER_WORKSPACE_ID" render ea sandboxes stop "$SANDBOX_ID" --confirm
+```
+
+If session or sandbox creation fails without a clear answer from the API, the
+runner also prints a `reconcile` command that lists recent resources, so you
+can find and delete one that may have been created.
 
 ## Troubleshooting
 
-### The session cannot be created
+### Preflight fails
 
-Confirm Agents API access, API-key permissions, and the beta API version pinned
-by the template.
+Confirm your Agents API access and that `OPENAI_API_KEY` can manage sessions.
 
 ### The environment never connects
 
-Check the executor stream, restricted environment key, environment ID, remote
-URL, and egress policy.
+Check the `[executor:stderr]` lines and `runs/<run_id>/executor.log`. Confirm
+the executor key can connect self-hosted environments.
 
 ### The task never starts
 
-Open the session event log and confirm the environment reached its connected
-state before input was submitted.
+Open `runs/<run_id>/events.jsonl` and confirm that the
+`agent.session.environment.connected` event arrived before the prompt was
+submitted.
 
 ### The agent produces no output files
 
-Inspect `runs/<run_id>/events.jsonl` and the final result. Output files are
-optional; prompts that need files should tell the agent to write them under
+Inspect `runs/<run_id>/events.jsonl` and `result.txt`. Output files are
+optional, so prompts that need files should ask Codex to write them under
 `/workspace/output`.
 
 ### Cleanup is incomplete
 
-Run the commands printed by the agent runner. Clean up the OpenAI session and Render
-Sandbox independently.
+Run the commands that the runner printed. Delete the session and terminate the
+sandbox independently.
 
 ## Next steps
 
-- [OpenAI self-hosted sandbox documentation](https://developers.openai.com/api/docs/guides/agents-api/environments/self-hosted)
+- [OpenAI Agents API self-hosted environments](https://developers.openai.com/api/docs/guides/agents-api/environments/self-hosted)
 - [Render Sandboxes documentation](https://render.com/docs/sandboxes)
+- [Build a coding agent with Claude Managed Agents and Render Sandboxes](https://render.com/docs/sandboxes/hosted-agents/claude-managed-agents)
+- [Build a coding agent with Cursor Cloud Agents and Render Sandboxes](https://render.com/docs/sandboxes/hosted-agents/cursor)
 - [Template source](https://github.com/render-examples/openai-agents-api-sandbox)

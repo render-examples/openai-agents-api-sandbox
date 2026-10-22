@@ -175,11 +175,9 @@ export class NativeSessionRun implements OpenAISessionRun {
       case "agent.session.turn.item.done":
         console.log(`progress      ${event.item.type}`);
         break;
-      case "agent.session.turn.output_text.delta":
-        process.stdout.write(this.redactor.text(event.delta));
-        break;
       case "agent.session.turn.output_text.done":
         this.textParts.set(partKey(event), event.text);
+        console.log(`agent         ${this.redactor.text(event.text).replaceAll("\n", "\n              ")}`);
         break;
       case "agent.session.turn.failed":
         if (event.turn.subagent_id === null) {

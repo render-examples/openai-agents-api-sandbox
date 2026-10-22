@@ -154,8 +154,7 @@ export async function runAgent(
     terminal = true;
     const safeResult = redactor.text(result.text || "(The agent returned no text.)");
     await store.writeResult(safeResult);
-    console.log(`\nagent         ${safeResult.replaceAll("\n", "\n              ")}`);
-    console.log("\nresult        task completed");
+    console.log("result        task completed");
 
     await store.update({ phase: "copying_outputs" });
     const localOutput = config.outputDirectory
@@ -212,7 +211,10 @@ export async function runAgent(
   }
 
   const cleanup = store.snapshot().cleanup;
-  console.log(`cleanup       OpenAI session ${cleanup.provider}; sandbox ${cleanup.sandbox}`);
+  const describe = (outcome: string, done: string) => (outcome === "succeeded" ? done : outcome);
+  console.log(
+    `cleanup       session ${describe(cleanup.provider, "deleted")}; sandbox ${describe(cleanup.sandbox, "terminated")}`,
+  );
   const ambiguousMutation = store.snapshot().ambiguous_mutation;
   if (ambiguousMutation) console.error(`reconcile     ${ambiguousMutation}`);
   if (cleanupErrors.length > 0) {
