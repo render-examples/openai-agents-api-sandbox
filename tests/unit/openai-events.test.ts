@@ -1,15 +1,14 @@
-import { mkdtemp, readFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { readFile } from "node:fs/promises";
 import type { Stream } from "openai/core/streaming";
 import type { AgentSessionEvent } from "openai/resources/beta/agents/agents";
 import { expect, it } from "vitest";
 import { NativeSessionRun } from "../../src/openai.js";
 import { Redactor } from "../../src/redaction.js";
 import { RunStore } from "../../src/state.js";
+import { temporaryDirectory } from "../temporary.js";
 
 it("consumes native readiness, text, and root completion events", async () => {
-  const root = await mkdtemp(join(tmpdir(), "openai-events-"));
+  const root = await temporaryDirectory("openai-events-");
   const store = await RunStore.create(root, 60_000);
   const events = [
     {

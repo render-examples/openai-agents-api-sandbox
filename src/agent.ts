@@ -45,16 +45,15 @@ export async function runAgent(
   const cleanupErrors: Error[] = [];
 
   console.log("provider      openai");
-  console.log("preflight     passed");
 
   try {
+    await openai.preflight(signal);
+    console.log("preflight     passed");
+
     await store.update({ phase: "creating_openai_session" });
     let connection;
     try {
-      connection = await raceAbort(
-        openai.createSession(config.openaiModel, signal),
-        signal,
-      );
+      connection = await openai.createSession(config.openaiModel);
     } catch (error) {
       if (isAmbiguousMutationError(error)) {
         await store.update({
@@ -74,27 +73,25 @@ export async function runAgent(
       openai_environment_id: connection.environmentId,
       cleanup: { provider: "pending", sandbox: "not-created" },
     });
+    signal.throwIfAborted();
 
     await store.update({
       phase: "creating_sandbox",
-      effective_egress: [...EGRESS_DESTINATIONS],
+      effective_egress_policy: [...EGRESS_DESTINATIONS],
     });
     try {
-      sandboxId = await raceAbort(
-        render.create(
-          buildSandboxLaunchInput(
-            config.openaiExecutorApiKey,
-            Math.min(86_400, Math.ceil(config.timeoutMs / 1_000) + 120),
-          ),
+      sandboxId = await render.create(
+        buildSandboxLaunchInput(
+          config.openaiExecutorApiKey,
+          Math.min(86_400, Math.ceil(config.timeoutMs / 1_000) + 120),
         ),
-        signal,
       );
     } catch (error) {
       if (isAmbiguousMutationError(error)) {
         await store.update({
           phase: "failed",
           ambiguous_mutation:
-            "Render Sandbox creation may have succeeded without returning an ID. Reconcile before retrying: render ea sandboxes list",
+            'Render Sandbox creation may have succeeded without returning an ID. Reconcile before retrying: RENDER_WORKSPACE="$RENDER_WORKSPACE_ID" render ea sandboxes list',
           cleanup: { provider: "pending", sandbox: "unknown" },
         });
       }
@@ -107,7 +104,7 @@ export async function runAgent(
       cleanup: { provider: "pending", sandbox: "pending" },
     });
     console.log(`provision     ${sandboxId}`);
-    await raceAbort(render.waitUntilRunning(sandboxId, deadlineMs, signal), signal);
+    await render.waitUntilRunning(sandboxId, deadlineMs, signal);
 
     const installScript = await readFile(
       new URL("../scripts/install-executor.sh", import.meta.url),
@@ -132,6 +129,7 @@ export async function runAgent(
       signal,
     );
     const executorExited = executorExitFailure(executor);
+    void executorExited.catch(() => undefined);
 
     await store.update({ phase: "waiting_for_environment" });
     await Promise.race([
@@ -179,7 +177,7 @@ export async function runAgent(
     await store.update({ phase: "cleanup" });
     runResult = { runDirectory: store.runDirectory, result: safeResult, outputFiles };
   } catch (error) {
-    primaryError = error;
+    primaryError = signal.aborted ? signal.reason : error;
     await store.update({ phase: "failed" });
   } finally {
     sessionRun?.close();
@@ -235,18 +233,17 @@ function executorExitFailure(executor: ExecutorHandle): Promise<never> {
   });
 }
 
-function raceAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+/** Rejects with the abort reason for operations that do not accept a signal. */
+export function raceAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   if (signal.aborted) return Promise.reject(signal.reason ?? new Error("Aborted"));
-  return Promise.race([
-    promise,
-    new Promise<never>((_, reject) => {
-      signal.addEventListener(
-        "abort",
-        () => reject(signal.reason ?? new Error("Aborted")),
-        { once: true },
-      );
-    }),
-  ]);
+  let onAbort!: () => void;
+  const aborted = new Promise<never>((_, reject) => {
+    onAbort = () => reject(signal.reason ?? new Error("Aborted"));
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+  return Promise.race([promise, aborted]).finally(() => {
+    signal.removeEventListener("abort", onAbort);
+  });
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
@@ -275,6 +272,8 @@ function printManualCleanup(
     );
   }
   if (sandboxId && cleanup.sandbox === "failed") {
-    console.error(`render ea sandboxes stop ${sandboxId} --confirm`);
+    console.error(
+      `RENDER_WORKSPACE="$RENDER_WORKSPACE_ID" render ea sandboxes stop ${sandboxId} --confirm`,
+    );
   }
 }

@@ -55,7 +55,7 @@ async function main(): Promise<void> {
 }
 
 export function parseArguments(argv: string[]): Arguments {
-  let prompt: string | undefined;
+  const promptParts: string[] = [];
   let timeoutSeconds: number | undefined;
   let outputDirectory: string | undefined;
 
@@ -63,8 +63,8 @@ export function parseArguments(argv: string[]): Arguments {
     const argument = argv[index]!;
     if (argument === "--timeout") {
       const value = argv[++index];
-      if (!value || !/^\d+$/.test(value)) {
-        throw new Error("--timeout requires a positive integer number of seconds");
+      if (!value || !/^\d+$/.test(value) || Number(value) <= 0) {
+        throw new Error("--timeout must be a positive integer number of seconds");
       }
       timeoutSeconds = Number(value);
     } else if (argument === "--output") {
@@ -73,14 +73,13 @@ export function parseArguments(argv: string[]): Arguments {
       outputDirectory = value;
     } else if (argument.startsWith("--")) {
       throw new Error(`Unknown option: ${argument}`);
-    } else if (prompt === undefined) {
-      prompt = argument;
     } else {
-      throw new Error("Pass the prompt as one quoted argument");
+      promptParts.push(argument);
     }
   }
 
-  if (!prompt?.trim()) {
+  const prompt = promptParts.join(" ").trim();
+  if (!prompt) {
     throw new Error(
       'Usage: npm run agent -- "<prompt>" [--timeout <seconds>] [--output <path>]',
     );

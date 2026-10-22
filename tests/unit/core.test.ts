@@ -1,11 +1,13 @@
-import { mkdtemp, readFile, stat } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { getEventListeners } from "node:events";
+import { readFile, stat } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
+import { raceAbort } from "../../src/agent.js";
 import { parseArguments } from "../../src/cli.js";
 import { loadConfig } from "../../src/config.js";
+import { isAmbiguousMutationError } from "../../src/openai.js";
 import { Redactor } from "../../src/redaction.js";
 import { RunStore } from "../../src/state.js";
+import { temporaryDirectory } from "../temporary.js";
 
 describe("configuration", () => {
   const env = {
@@ -36,11 +38,37 @@ describe("configuration", () => {
       outputDirectory: "./artifacts",
     });
   });
+
+  it("joins unquoted prompt words like the other templates", () => {
+    expect(parseArguments(["make", "a", "file"]).prompt).toBe("make a file");
+  });
+
+  it.each(["12.5", "0", "-1", "abc"])("rejects --timeout %s", (value) => {
+    expect(() => parseArguments(["prompt", "--timeout", value])).toThrow("positive integer");
+  });
+});
+
+describe("lifecycle helpers", () => {
+  it("raceAbort removes its abort listener once the operation settles", async () => {
+    const controller = new AbortController();
+    for (let index = 0; index < 20; index += 1) {
+      await raceAbort(Promise.resolve(index), controller.signal);
+    }
+    expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
+  });
+
+  it("treats only retryable or unknown outcomes as ambiguous", () => {
+    expect(isAmbiguousMutationError(new TypeError("fetch failed"))).toBe(true);
+    expect(isAmbiguousMutationError(Object.assign(new Error("x"), { status: 503 }))).toBe(true);
+    expect(isAmbiguousMutationError(Object.assign(new Error("x"), { status: 400 }))).toBe(false);
+    expect(isAmbiguousMutationError(Object.assign(new Error("x"), { statusCode: 422 }))).toBe(false);
+    expect(isAmbiguousMutationError(Object.assign(new Error("x"), { statusCode: 502 }))).toBe(true);
+  });
 });
 
 describe("state and redaction", () => {
   it("atomically persists private state and redacted events", async () => {
-    const root = await mkdtemp(join(tmpdir(), "openai-render-state-"));
+    const root = await temporaryDirectory("openai-render-state-");
     const store = await RunStore.create(root, 60_000);
     const redactor = new Redactor(["sk-known-secret-123456"]);
     await store.update({ openai_session_id: "sess_123", phase: "running" });

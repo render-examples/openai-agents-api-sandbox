@@ -1,10 +1,18 @@
 import type { SandboxCreateInput } from "@renderinc/sdk/experimental";
 
-export const EGRESS_DESTINATIONS = [
+/** Hosts `codex exec-server` needs while it serves the session. */
+export const RUNTIME_DESTINATIONS = [
   "api.openai.com",
   "codex-cloud-environments.chatgpt.com",
-  "registry.npmjs.org",
 ] as const;
+
+/**
+ * Hosts used only to install the pinned Codex release. The SDK cannot narrow a
+ * policy after creation, so they stay allowed for this short-lived run.
+ */
+export const INSTALL_DESTINATIONS = ["registry.npmjs.org"] as const;
+
+export const EGRESS_DESTINATIONS = [...RUNTIME_DESTINATIONS, ...INSTALL_DESTINATIONS];
 
 export const CREDENTIAL_DELIVERY_MODE = "creation-env-compatibility-seam" as const;
 

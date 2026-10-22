@@ -25,7 +25,8 @@ export interface OpenAISessionRun {
 }
 
 export interface OpenAIAgentsOperations {
-  createSession(model: string, signal: AbortSignal): Promise<SessionConnection>;
+  preflight(signal: AbortSignal): Promise<void>;
+  createSession(model: string): Promise<SessionConnection>;
   openSessionEvents(sessionId: string, store: RunStore): Promise<OpenAISessionRun>;
   submitPrompt(sessionId: string, prompt: string, idempotencyKey: string): Promise<void>;
   cancelActiveTurn(sessionId: string): Promise<void>;
@@ -39,7 +40,16 @@ export class OpenAIAgents implements OpenAIAgentsOperations {
     this.client = new OpenAI({ apiKey, maxRetries: 0 });
   }
 
-  async createSession(model: string, signal: AbortSignal): Promise<SessionConnection> {
+  /** Confirms Agents API access before any Render resource is created. */
+  async preflight(signal: AbortSignal): Promise<void> {
+    await this.client.beta.agents.sessions.list({ limit: 1 }, { signal, maxRetries: 2 });
+  }
+
+  /**
+   * Not abortable: an abandoned request could create a session whose ID is
+   * never recorded and therefore never deleted.
+   */
+  async createSession(model: string): Promise<SessionConnection> {
     const session = await this.client.beta.agents.sessions.create(
       {
         agent: {
@@ -52,7 +62,7 @@ export class OpenAIAgents implements OpenAIAgentsOperations {
           workspace_directory: "/workspace",
         },
       },
-      { signal, maxRetries: 0 },
+      { maxRetries: 0 },
     );
     return sessionConnection(session);
   }
@@ -235,8 +245,14 @@ function deferred<T>(): {
   return { promise, resolve, reject };
 }
 
+/**
+ * True when a failed mutation may still have taken effect on the server. OpenAI
+ * errors expose `status`; Render SDK errors expose `statusCode`.
+ */
 export function isAmbiguousMutationError(error: unknown): boolean {
-  if (!(error instanceof Error)) return true;
-  const status = "status" in error && typeof error.status === "number" ? error.status : undefined;
-  return status === undefined || status === 408 || status === 409 || status === 429 || status >= 500;
+  if (typeof error !== "object" || error === null) return true;
+  const { status, statusCode } = error as { status?: unknown; statusCode?: unknown };
+  const code =
+    typeof status === "number" ? status : typeof statusCode === "number" ? statusCode : undefined;
+  return code === undefined || code === 408 || code === 409 || code === 429 || code >= 500;
 }

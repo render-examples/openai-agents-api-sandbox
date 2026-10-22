@@ -20,7 +20,7 @@ export interface RunState {
   openai_session_id?: string;
   openai_environment_id?: string;
   submission_idempotency_key?: string;
-  effective_egress?: string[];
+  effective_egress_policy?: string[];
   ambiguous_mutation?: string;
   cleanup: {
     provider: CleanupOutcome;

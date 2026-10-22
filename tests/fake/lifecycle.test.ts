@@ -1,6 +1,6 @@
-import { mkdtemp, readFile, readdir } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { describe, expect, it } from "vitest";
 import { runAgent } from "../../src/agent.js";
 import type { Config } from "../../src/config.js";
@@ -11,18 +11,19 @@ import type {
 import { Redactor } from "../../src/redaction.js";
 import { RenderSandbox, type SandboxApi } from "../../src/render.js";
 import type { RunStore } from "../../src/state.js";
+import { temporaryDirectory } from "../temporary.js";
 
 describe("provider-native fake lifecycle", () => {
   it("orders readiness, submission, output handoff, and independent cleanup", async () => {
     const order: string[] = [];
-    const root = await mkdtemp(join(tmpdir(), "openai-render-run-"));
+    const root = await temporaryDirectory("openai-render-run-");
     const redactor = new Redactor([
       "rnd_render_secret_12345",
       "sk-application-secret-12345",
       "sk-executor-secret-67890",
     ]);
     const api = fakeSandboxApi(order);
-    const render = RenderSandbox.withApi(api, redactor);
+    const render = new RenderSandbox("unused", "tea-example", redactor, api);
     const openai = fakeOpenAI(order);
     const config: Config = {
       renderApiKey: "rnd_render_secret_12345",
@@ -63,9 +64,9 @@ describe("provider-native fake lifecycle", () => {
 
   it("terminates Render when OpenAI cleanup fails and records separate outcomes", async () => {
     const order: string[] = [];
-    const root = await mkdtemp(join(tmpdir(), "openai-render-cleanup-"));
+    const root = await temporaryDirectory("openai-render-cleanup-");
     const redactor = new Redactor(["render-key", "application-key", "executor-key"]);
-    const render = RenderSandbox.withApi(fakeSandboxApi(order), redactor);
+    const render = new RenderSandbox("unused", "tea-example", redactor, fakeSandboxApi(order));
     const openai = fakeOpenAI(order);
     openai.deleteSession = async () => {
       order.push("delete-session-failed");
@@ -102,7 +103,7 @@ describe("provider-native fake lifecycle", () => {
 
   it("fails closed and records an ambiguous non-idempotent creation", async () => {
     const order: string[] = [];
-    const root = await mkdtemp(join(tmpdir(), "openai-render-ambiguous-"));
+    const root = await temporaryDirectory("openai-render-ambiguous-");
     const redactor = new Redactor(["render-key", "application-key", "executor-key"]);
     const openai = fakeOpenAI(order);
     openai.createSession = async () => {
@@ -123,20 +124,64 @@ describe("provider-native fake lifecycle", () => {
         "do not retry this",
         config,
         openai,
-        RenderSandbox.withApi(fakeSandboxApi(order), redactor),
+        new RenderSandbox("unused", "tea-example", redactor, fakeSandboxApi(order)),
         redactor,
         new AbortController().signal,
         root,
       ),
     ).rejects.toThrow("connection reset");
 
-    expect(order).toEqual(["create-session-ambiguous"]);
+    expect(order).toEqual(["preflight", "create-session-ambiguous"]);
     const [runDirectory] = await readdir(root);
     const state = JSON.parse(
       await readFile(join(root, runDirectory!, "run.json"), "utf8"),
     ) as { ambiguous_mutation: string; cleanup: { provider: string; sandbox: string } };
     expect(state.ambiguous_mutation).toContain("Reconcile before retrying");
     expect(state.cleanup).toEqual({ provider: "unknown", sandbox: "not-created" });
+  });
+});
+
+describe("interrupts during creation", () => {
+  it("records and terminates a sandbox whose create completes after SIGINT", async () => {
+    const order: string[] = [];
+    const root = await temporaryDirectory("openai-render-interrupt-");
+    const redactor = new Redactor(["render-key", "application-key", "executor-key"]);
+    const api = fakeSandboxApi(order);
+    const controller = new AbortController();
+    const create = api.create;
+    api.create = async (input) => {
+      controller.abort(new Error("Received SIGINT"));
+      await sleep(20);
+      return create(input);
+    };
+    const config: Config = {
+      renderApiKey: "render-key",
+      renderWorkspaceId: "tea-example",
+      openaiApiKey: "application-key",
+      openaiExecutorApiKey: "executor-key",
+      openaiModel: "gpt-6-astra",
+      timeoutMs: 60_000,
+    };
+
+    await expect(
+      runAgent(
+        "write hello.txt",
+        config,
+        fakeOpenAI(order),
+        new RenderSandbox("unused", "tea-example", redactor, api),
+        redactor,
+        controller.signal,
+        root,
+      ),
+    ).rejects.toThrow("Received SIGINT");
+
+    expect(order).toContain("terminate");
+    const [runDirectory] = await readdir(root);
+    const state = JSON.parse(
+      await readFile(join(root, runDirectory!, "run.json"), "utf8"),
+    ) as { sandbox_id?: string; cleanup: { provider: string; sandbox: string } };
+    expect(state.sandbox_id).toBe("sbx-123");
+    expect(state.cleanup).toEqual({ provider: "succeeded", sandbox: "succeeded" });
   });
 });
 
@@ -154,6 +199,9 @@ function fakeOpenAI(order: string[]): OpenAIAgentsOperations {
     },
   };
   return {
+    async preflight() {
+      order.push("preflight");
+    },
     async createSession() {
       order.push("create-session");
       return {

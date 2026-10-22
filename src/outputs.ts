@@ -35,11 +35,11 @@ export async function copyWorkspaceOutputs(
     }
 
     const remotePath = posix.join("/workspace/output", relativePath);
-    const download = await render.api.download(sandboxId, remotePath, undefined, signal);
-    redactor.assertSafeBytes(download.data, remotePath);
+    const data = await render.download(sandboxId, remotePath, signal);
+    redactor.assertSafeBytes(data, remotePath);
     await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
     const temporary = `${destination}.${randomBytes(3).toString("hex")}.tmp`;
-    await writeFile(temporary, download.data, { mode: 0o600 });
+    await writeFile(temporary, data, { mode: 0o600 });
     await chmod(temporary, 0o600);
     await rename(temporary, destination);
   }

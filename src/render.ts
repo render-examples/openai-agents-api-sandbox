@@ -1,4 +1,5 @@
 import { appendFile } from "node:fs/promises";
+import { setTimeout as sleep } from "node:timers/promises";
 import { Render } from "@renderinc/sdk";
 import type {
   SandboxCreateInput,
@@ -27,37 +28,35 @@ export interface ExecutorHandle {
 }
 
 export class RenderSandbox {
-  readonly api: SandboxApi;
+  private readonly api: SandboxApi;
 
   constructor(
     token: string,
     ownerId: `tea-${string}`,
     private readonly redactor: Redactor,
+    api?: SandboxApi,
   ) {
-    this.api = new Render({ token, ownerId }).experimental.sandboxes;
-  }
-
-  static withApi(api: SandboxApi, redactor: Redactor): RenderSandbox {
-    const instance = Object.create(RenderSandbox.prototype) as RenderSandbox;
-    Object.defineProperty(instance, "api", { value: api });
-    Object.defineProperty(instance, "redactor", { value: redactor });
-    return instance;
+    this.api = api ?? new Render({ token, ownerId }).experimental.sandboxes;
   }
 
   async create(input: SandboxCreateInput): Promise<string> {
     return (await this.api.create(input)).id;
   }
 
+  async download(id: string, path: string, signal: AbortSignal): Promise<Buffer> {
+    return (await this.api.download(id, path, undefined, signal)).data;
+  }
+
   async waitUntilRunning(id: string, deadlineMs: number, signal: AbortSignal): Promise<void> {
     let delayMs = 750;
     while (Date.now() < deadlineMs) {
-      throwIfAborted(signal);
+      signal.throwIfAborted();
       const sandbox = await this.api.get(id);
       if (sandbox.status === "running") return;
       if (sandbox.status === "errored" || sandbox.status === "terminated") {
         throw new Error(`Render Sandbox ${id} entered ${sandbox.status}`);
       }
-      await delay(delayMs, signal);
+      await sleep(delayMs, undefined, { signal });
       delayMs = Math.min(Math.round(delayMs * 1.4), 3_000);
     }
     throw new Error(`Timed out waiting for Render Sandbox ${id} to become running`);
@@ -155,22 +154,4 @@ export function shellQuote(value: string): string {
 function truncate(value: string, maxBytes: number): string {
   if (Buffer.byteLength(value) <= maxBytes) return value;
   return `${Buffer.from(value).subarray(0, maxBytes).toString("utf8")}\n[output truncated]\n`;
-}
-
-function delay(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(resolve, ms);
-    signal.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timer);
-        reject(signal.reason ?? new Error("Aborted"));
-      },
-      { once: true },
-    );
-  });
-}
-
-function throwIfAborted(signal: AbortSignal): void {
-  if (signal.aborted) throw signal.reason ?? new Error("Aborted");
 }

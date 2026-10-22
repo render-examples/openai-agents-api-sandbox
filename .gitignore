@@ -1,5 +1,7 @@
 node_modules/
+dist/
 .env
 runs/
+.test-*/
 *.log
 .DS_Store
