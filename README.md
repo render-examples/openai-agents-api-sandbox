@@ -11,6 +11,10 @@ copied back to your machine.
 Follow the tutorial:
 [Build a coding agent with OpenAI Agents API and Render Sandboxes](https://render.com/docs/sandboxes/hosted-agents/openai).
 Its source is [`docs/tutorial.md`](docs/tutorial.md).
+[`docs/providers/render.md`](docs/providers/render.md) is the source for the
+Render page in OpenAI's
+[self-hosted sandbox providers](https://developers.openai.com/api/docs/guides/agents-api/environments/self-hosted)
+docs.
 
 ## Quickstart
 
