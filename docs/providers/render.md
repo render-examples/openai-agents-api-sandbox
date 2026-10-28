@@ -1,6 +1,6 @@
 # Render
 
-See the [application-managed example](https://github.com/render-examples/openai-agents-api-sandbox) and the [Render tutorial](https://render.com/docs/sandboxes/hosted-agents/openai) for a complete, runnable implementation.
+See the [application-managed example](https://github.com/render-examples/openai-agents-api-sandbox) and the [Render tutorial](https://render.com/docs/sandboxes-openai-agents-api) for a complete, runnable implementation.
 
 See [Self-hosted sandboxes](https://developers.openai.com/api/docs/guides/agents-api/environments/self-hosted) for executor setup and connection requirements.
 
@@ -27,5 +27,5 @@ Use the HTTP examples in [Run and continue sessions](https://developers.openai.c
 ## References
 
 - Read [Render Sandboxes documentation](https://render.com/docs/sandboxes)
-- Read [Run the OpenAI Agents API on Render Sandboxes](https://render.com/docs/sandboxes/hosted-agents/openai)
+- Read [Run the OpenAI Agents API on Render Sandboxes](https://render.com/docs/sandboxes-openai-agents-api)
 - Read [Render TypeScript SDK source](https://github.com/render-oss/sdk/tree/main/typescript)

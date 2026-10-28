@@ -91,7 +91,7 @@ export async function runAgent(
         await store.update({
           phase: "failed",
           ambiguous_mutation:
-            'Render Sandbox creation may have succeeded without returning an ID. Reconcile before retrying: RENDER_WORKSPACE="$RENDER_WORKSPACE_ID" render ea sandboxes list',
+            'Render Sandbox creation may have succeeded without returning an ID. Reconcile before retrying: RENDER_WORKSPACE="$RENDER_WORKSPACE_ID" render sandboxes list',
           cleanup: { provider: "pending", sandbox: "unknown" },
         });
       }
@@ -275,7 +275,7 @@ function printManualCleanup(
   }
   if (sandboxId && cleanup.sandbox === "failed") {
     console.error(
-      `RENDER_WORKSPACE="$RENDER_WORKSPACE_ID" render ea sandboxes stop ${sandboxId} --confirm`,
+      `RENDER_WORKSPACE="$RENDER_WORKSPACE_ID" render sandboxes stop ${sandboxId} --confirm`,
     );
   }
 }
