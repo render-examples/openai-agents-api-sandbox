@@ -1,4 +1,4 @@
-# Build a coding agent with OpenAI Agents API and Render Sandboxes
+# Run the OpenAI Agents API on Render Sandboxes
 
 > **Note:** Render Sandboxes is in early access. The OpenAI Agents API is in
 > beta, and `codex exec-server` is experimental.
@@ -232,6 +232,6 @@ sandbox independently.
 
 - [OpenAI Agents API self-hosted environments](https://developers.openai.com/api/docs/guides/agents-api/environments/self-hosted)
 - [Render Sandboxes documentation](https://render.com/docs/sandboxes)
-- [Build a coding agent with Claude Managed Agents and Render Sandboxes](https://render.com/docs/sandboxes/hosted-agents/claude-managed-agents)
-- [Build a coding agent with Cursor Cloud Agents and Render Sandboxes](https://render.com/docs/sandboxes/hosted-agents/cursor)
+- [Run Claude Managed Agents on Render Sandboxes](https://render.com/docs/sandboxes/hosted-agents/claude-managed-agents)
+- [Run Cursor Cloud Agents on Render Sandboxes](https://render.com/docs/sandboxes/hosted-agents/cursor)
 - [Template source](https://github.com/render-examples/openai-agents-api-sandbox)

@@ -9,7 +9,7 @@ copied back to your machine.
 > `codex exec-server` is experimental.
 
 Follow the tutorial:
-[Build a coding agent with OpenAI Agents API and Render Sandboxes](https://render.com/docs/sandboxes/hosted-agents/openai).
+[Run the OpenAI Agents API on Render Sandboxes](https://render.com/docs/sandboxes/hosted-agents/openai).
 Its source is [`docs/tutorial.md`](docs/tutorial.md).
 [`docs/providers/render.md`](docs/providers/render.md) is the source for the
 Render page in OpenAI's

@@ -27,5 +27,5 @@ Use the HTTP examples in [Run and continue sessions](https://developers.openai.c
 ## References
 
 - Read [Render Sandboxes documentation](https://render.com/docs/sandboxes)
-- Read [Build a coding agent with OpenAI Agents API and Render Sandboxes](https://render.com/docs/sandboxes/hosted-agents/openai)
+- Read [Run the OpenAI Agents API on Render Sandboxes](https://render.com/docs/sandboxes/hosted-agents/openai)
 - Read [Render TypeScript SDK source](https://github.com/render-oss/sdk/tree/main/typescript)
