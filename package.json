@@ -1,6 +1,6 @@
 {
   "name": "openai-agents-api-sandbox",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "Run an OpenAI Agents API self-hosted environment in a Render Sandbox",
   "type": "module",
