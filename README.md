@@ -19,8 +19,11 @@ docs.
 ## Quickstart
 
 You need Node.js 22+, a Render workspace with Sandboxes enabled, OpenAI Agents
-API access, an application API key, and a separate executor key restricted to
-connecting self-hosted environments.
+API access, an application API key, and an
+[environment key](https://platform.openai.com/agents?tab=environments&environment_view=keys)
+for the executor. Create the environment key on the Agents tab, in the same
+project and user as the application key. A regular API key can't connect
+environments, even with all permissions.
 
 ```bash
 npm ci
@@ -36,8 +39,9 @@ Options:
 ```
 
 Each run writes `run.json`, `events.jsonl`, `executor.log`, and `result.txt`
-under `runs/<run_id>/`. The runner deletes its session and terminates its
-sandbox.
+under `runs/<run_id>/`. `run.json` ends with `phase` set to `completed` or
+`failed`, and a failed run records the reason in `error`. The runner deletes
+its session and terminates its sandbox.
 
 ## Verified versions
 

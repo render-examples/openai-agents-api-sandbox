@@ -177,7 +177,7 @@ export async function runAgent(
     runResult = { runDirectory: store.runDirectory, result: safeResult, outputFiles };
   } catch (error) {
     primaryError = signal.aborted ? signal.reason : error;
-    await store.update({ phase: "failed" });
+    await store.update({ phase: "failed", error: redactor.text(errorMessage(primaryError)) });
   } finally {
     sessionRun?.close();
     executor?.stop();
@@ -209,6 +209,8 @@ export async function runAgent(
       }
     }
   }
+
+  if (runResult && cleanupErrors.length === 0) await store.update({ phase: "completed" });
 
   const cleanup = store.snapshot().cleanup;
   const describe = (outcome: string, done: string) => (outcome === "succeeded" ? done : outcome);
@@ -259,7 +261,11 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): 
 }
 
 function asError(prefix: string, error: unknown): Error {
-  return new Error(`${prefix}: ${error instanceof Error ? error.message : String(error)}`);
+  return new Error(`${prefix}: ${errorMessage(error)}`);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function printManualCleanup(

@@ -22,6 +22,7 @@ export interface RunState {
   submission_idempotency_key?: string;
   effective_egress_policy?: string[];
   ambiguous_mutation?: string;
+  error?: string;
   cleanup: {
     provider: CleanupOutcome;
     sandbox: CleanupOutcome;

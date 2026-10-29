@@ -110,16 +110,18 @@ export class RenderSandbox {
     let stdout = "";
     let stderr = "";
     let exitCode: number | undefined;
+    const log = new LineLabeler((stream) => `[${stream}] `);
     for await (const event of events) {
       if (event.type === "output") {
         const safe = this.redactor.text(event.data);
-        if (logPath) await appendFile(logPath, `[${event.stream}] ${safe}`, { mode: 0o600 });
+        if (logPath) await appendFile(logPath, log.format(event.stream, safe), { mode: 0o600 });
         if (event.stream === "stdout" && Buffer.byteLength(stdout) < maxBytes) stdout += safe;
         if (event.stream === "stderr" && Buffer.byteLength(stderr) < maxBytes) stderr += safe;
       } else {
         exitCode = event.exit_code;
       }
     }
+    if (logPath) await appendFile(logPath, log.end(), { mode: 0o600 });
     if (exitCode === undefined) throw new Error("Render exec stream ended without an exit event");
     return {
       stdout: truncate(stdout, maxBytes),
@@ -133,17 +135,54 @@ export class RenderSandbox {
   }
 
   private async drain(events: AsyncIterable<SandboxExecEvent>, logPath: string): Promise<number> {
+    const log = new LineLabeler((stream) => `[${stream}] `);
+    const terminal = new LineLabeler((stream) => `[executor:${stream}] `);
     for await (const event of events) {
       if (event.type === "output") {
         const safe = this.redactor.text(event.data);
-        await appendFile(logPath, `[${event.stream}] ${safe}`, { mode: 0o600 });
-        process.stderr.write(`[executor:${event.stream}] ${safe}`);
+        await appendFile(logPath, log.format(event.stream, safe), { mode: 0o600 });
+        process.stderr.write(terminal.format(event.stream, safe));
       } else {
-        await appendFile(logPath, `[exit] ${event.exit_code}\n`, { mode: 0o600 });
+        await appendFile(logPath, `${log.end()}[exit] ${event.exit_code}\n`, { mode: 0o600 });
+        process.stderr.write(terminal.end());
         return event.exit_code;
       }
     }
     throw new Error("Executor stream ended without an exit event");
+  }
+}
+
+/**
+ * Labels each line of interleaved stdout/stderr output. Exec events arrive in
+ * arbitrary chunks, so a line can span several events.
+ */
+export class LineLabeler {
+  private lastStream: string | undefined;
+  private atLineStart = true;
+
+  constructor(private readonly label: (stream: string) => string) {}
+
+  format(stream: string, chunk: string): string {
+    if (!chunk) return "";
+    let formatted = "";
+    if (stream !== this.lastStream && !this.atLineStart) {
+      formatted += "\n";
+      this.atLineStart = true;
+    }
+    this.lastStream = stream;
+    for (const piece of chunk.split(/(?<=\n)/)) {
+      if (this.atLineStart) formatted += this.label(stream);
+      formatted += piece;
+      this.atLineStart = piece.endsWith("\n");
+    }
+    return formatted;
+  }
+
+  /** Terminates a trailing partial line. */
+  end(): string {
+    if (this.atLineStart) return "";
+    this.atLineStart = true;
+    return "\n";
   }
 }
 

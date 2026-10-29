@@ -6,6 +6,7 @@ import { parseArguments } from "../../src/cli.js";
 import { loadConfig } from "../../src/config.js";
 import { isAmbiguousMutationError } from "../../src/openai.js";
 import { Redactor } from "../../src/redaction.js";
+import { LineLabeler } from "../../src/render.js";
 import { RunStore } from "../../src/state.js";
 import { temporaryDirectory } from "../temporary.js";
 
@@ -85,6 +86,24 @@ describe("state and redaction", () => {
     const events = await readFile(store.eventsPath, "utf8");
     expect(events).toContain("[REDACTED]");
     expect(events).not.toContain("sk-known-secret-123456");
+  });
+
+  it("labels each line of chunked, interleaved executor output once", () => {
+    const labeler = new LineLabeler((stream) => `[${stream}] `);
+    const log = [
+      labeler.format("stderr", "Error: "),
+      labeler.format("stderr", "authentication failed"),
+      labeler.format("stderr", " (403)\nsecond"),
+      labeler.format("stdout", "out\n"),
+      labeler.format("stderr", "tail"),
+      labeler.end(),
+    ].join("");
+    expect(log).toBe(
+      "[stderr] Error: authentication failed (403)\n" +
+        "[stderr] second\n" +
+        "[stdout] out\n" +
+        "[stderr] tail\n",
+    );
   });
 
   it("refuses an artifact containing a known secret", () => {

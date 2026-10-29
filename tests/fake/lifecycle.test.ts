@@ -56,10 +56,59 @@ describe("provider-native fake lifecycle", () => {
     const stateText = await readFile(join(result.runDirectory, "run.json"), "utf8");
     expect(stateText).not.toContain(config.openaiApiKey);
     expect(stateText).not.toContain(config.openaiExecutorApiKey);
-    expect(JSON.parse(stateText).cleanup).toEqual({
+    const state = JSON.parse(stateText);
+    expect(state.phase).toBe("completed");
+    expect(state).not.toHaveProperty("error");
+    expect(state.cleanup).toEqual({
       provider: "succeeded",
       sandbox: "succeeded",
     });
+  });
+
+  it("records a redacted failure reason when the session fails", async () => {
+    const order: string[] = [];
+    const root = await temporaryDirectory("openai-render-failure-");
+    const redactor = new Redactor(["render-key", "application-key", "executor-key"]);
+    const openai = fakeOpenAI(order);
+    const openSessionEvents = openai.openSessionEvents;
+    openai.openSessionEvents = async (sessionId, store) => {
+      const run = await openSessionEvents(sessionId, store);
+      return {
+        ...run,
+        async waitForCompletion() {
+          throw new Error("Your account is not active (key executor-key)");
+        },
+      };
+    };
+    const config: Config = {
+      renderApiKey: "render-key",
+      renderWorkspaceId: "tea-example",
+      openaiApiKey: "application-key",
+      openaiExecutorApiKey: "executor-key",
+      openaiModel: "gpt-6-astra",
+      timeoutMs: 60_000,
+    };
+
+    await expect(
+      runAgent(
+        "write hello.txt",
+        config,
+        openai,
+        new RenderSandbox("unused", "tea-example", redactor, fakeSandboxApi(order)),
+        redactor,
+        new AbortController().signal,
+        root,
+      ),
+    ).rejects.toThrow("Your account is not active");
+
+    const [runDirectory] = await readdir(root);
+    const state = JSON.parse(
+      await readFile(join(root, runDirectory!, "run.json"), "utf8"),
+    ) as { phase: string; error: string; cleanup: { provider: string; sandbox: string } };
+    expect(state.phase).toBe("failed");
+    expect(state.error).toContain("Your account is not active");
+    expect(state.error).not.toContain("executor-key");
+    expect(state.cleanup).toEqual({ provider: "succeeded", sandbox: "succeeded" });
   });
 
   it("terminates Render when OpenAI cleanup fails and records separate outcomes", async () => {
